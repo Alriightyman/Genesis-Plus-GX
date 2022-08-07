@@ -428,7 +428,7 @@
     <ClCompile Include="..\config.c" />
     <ClCompile Include="..\error.c" />
     <ClCompile Include="..\fileio.c" />
-    <ClCompile Include="..\sdl2\main.c" />
+    <ClCompile Include="..\sdl2\genspluxgx.c" />
     <ClCompile Include="..\unzip.c" />
   </ItemGroup>
   <ItemGroup>

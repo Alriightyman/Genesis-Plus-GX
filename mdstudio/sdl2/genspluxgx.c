@@ -1334,8 +1334,8 @@ int Init(int width, int height, void* parent, int pal, char region, int use_game
     /* initialize Genesis virtual system */
 #ifdef ALT_SDL_RENDERER    
     memset(&bitmap, 0, sizeof(t_bitmap));
-    bitmap.width = VIDEO_WIDTH;
-    bitmap.height = VIDEO_HEIGHT;
+    bitmap.width = windowWidth;
+    bitmap.height = windowHeight;
     #if defined(USE_8BPP_RENDERING)
         bitmap.pitch = (bitmap.width * 1);
     #elif defined(USE_15BPP_RENDERING)
