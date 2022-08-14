@@ -21,3 +21,6 @@ sdl/build_sdl2
 *.a
 *.vcxproj.*
 *.srm
+
+x64/
+Win32/
