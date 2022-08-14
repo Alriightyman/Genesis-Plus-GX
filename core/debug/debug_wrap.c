@@ -153,3 +153,25 @@ void send_dbg_request(dbg_request_t *request, request_type_t type, int ignore_ac
 #endif
     }
 }
+
+void send_dbg_request_forced(dbg_request_t* request, request_type_t type, int force_process_request)
+{
+    if (!request)
+        return;
+
+    request->req_type = type;
+
+    while (request && request->dbg_active == 1 && request->req_type != REQ_NO_REQUEST)
+    {
+        if (force_process_request)
+        {
+            process_request();
+        }
+
+#ifdef _WIN32
+        Sleep(10);
+#else
+        usleep(10 * 1000);
+#endif
+    }
+}
