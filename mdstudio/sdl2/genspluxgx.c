@@ -899,6 +899,7 @@ void SaveSram();
 
 int Shutdown()
 {
+    running = 0;
     set_cpu_hook(NULL);
     stop_debugging();
     close_shared_mem(&dbg_req_core, 1);
@@ -999,13 +1000,12 @@ unsigned int ReadLong(unsigned int address)
 
 void ReadMemory(unsigned int address, unsigned int size, BYTE* memory)
 {
-    // TODO:
-    /*for (unsigned int i = 0; i < size; i++)
+    for (unsigned int i = 0; i < size; i+=2)
     {
-        memory[i] = work_ram;
-    }*/
-
-    memory = work_ram;
+        // work ram is byte swapped..
+        memory[i] = work_ram[i+1];
+        memory[i + 1] = work_ram[i];
+    }
 }
 
 unsigned char ReadZ80Byte(unsigned int address)
@@ -1113,7 +1113,15 @@ void ClearWatchpoints()
 
 int StepInto()
 {
-    // TODO: add breakpoint debugging
+    if (!is_debugger_paused())
+    {
+        // force pause
+        send_dbg_request_forced(dbg_req_core, REQ_PAUSE, 0);
+    }
+    else
+    {
+        send_dbg_request_forced(dbg_req_core, REQ_STEP_INTO, 0);
+    }
     return 0;
 }
 
