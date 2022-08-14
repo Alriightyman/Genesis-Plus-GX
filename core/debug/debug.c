@@ -678,7 +678,7 @@ void process_breakpoints(bpt_type_t type, int width, unsigned int address, unsig
 
         if (!dbg_first_paused) {
             dbg_first_paused = 1;
-            dbg_req_core->dbg_paused = 1;
+            dbg_req_core->dbg_paused = 0;
 
             send_dbg_event(address, DBG_EVT_STARTED);
         }
