@@ -18,3 +18,6 @@ sdl/build_sdl2
 
 *.o
 *.aps
+*.a
+*.vcxproj.*
+*.srm
