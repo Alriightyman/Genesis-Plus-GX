@@ -659,78 +659,78 @@ void process_breakpoints(bpt_type_t type, int width, unsigned int address, unsig
         return;
 
     switch (type) {
-    case BPT_M68K_E: {
-        if (dbg_first_paused && dbg_in_interrupt) {
-            unsigned int pc = REG_PC;
-            unsigned short opc = m68k_read_immediate_16(pc);
+        case BPT_M68K_E: {
+            if (dbg_first_paused && dbg_in_interrupt) {
+                unsigned int pc = REG_PC;
+                unsigned short opc = m68k_read_immediate_16(pc);
 
-            if (opc != 0x4E73) { // rte
+                if (opc != 0x4E73) { // rte
+                    break;
+                }
+
+                dbg_in_interrupt = 0; // we at rte
                 break;
             }
 
-            dbg_in_interrupt = 0; // we at rte
-            break;
-        }
-
-        if (dbg_req_core->dbg_paused && dbg_first_paused && !dbg_trace) {
-            longjmp(jmp_env, 1);
-        }
-
-        if (!dbg_first_paused) {
-            dbg_first_paused = 1;
-            dbg_req_core->dbg_paused = 0;
-
-            send_dbg_event(address, DBG_EVT_STARTED);
-        }
-
-        if (dbg_trace) {
-            dbg_trace = 0;
-            dbg_req_core->dbg_paused = 1;
-
-            send_dbg_event(address, DBG_EVT_STEP);
-            break;
-        }
-
-        if (!dbg_req_core->dbg_paused) {
-            if (address < MAXROMSIZE && !dbg_req_core->pc_map[address >> 1].applied) {
-                dbg_req_core->pc_map[address >> 1].to_apply = 1;
+            if (dbg_req_core->dbg_paused && dbg_first_paused && !dbg_trace) {
+                longjmp(jmp_env, 1);
             }
 
-            if (dbg_step_over && address == dbg_step_over_addr) {
-                dbg_step_over = 0;
-                dbg_step_over_addr = 0;
+            if (!dbg_first_paused) {
+                dbg_first_paused = 1;
+                dbg_req_core->dbg_paused = 0;
 
+                send_dbg_event(address, DBG_EVT_STARTED);
+            }
+
+            if (dbg_trace) {
+                dbg_trace = 0;
                 dbg_req_core->dbg_paused = 1;
 
                 send_dbg_event(address, DBG_EVT_STEP);
-
-                longjmp(jmp_env, 1);
+                break;
             }
 
-            if (!dbg_continue_after_bp) {
-                check_breakpoint(BPT_M68K_E, 1, address, address);
-            }
+            if (!dbg_req_core->dbg_paused) {
+                if (address < MAXROMSIZE && !dbg_req_core->pc_map[address >> 1].applied) {
+                    dbg_req_core->pc_map[address >> 1].to_apply = 1;
+                }
 
-            if (dbg_req_core->dbg_paused) {
-                dbg_continue_after_bp = 1;
+                if (dbg_step_over && address == dbg_step_over_addr) {
+                    dbg_step_over = 0;
+                    dbg_step_over_addr = 0;
 
-                longjmp(jmp_env, 1);
-            }
-            else {
-                if (dbg_continue_after_bp) {
-                    dbg_continue_after_bp = 0;
+                    dbg_req_core->dbg_paused = 1;
+
+                    send_dbg_event(address, DBG_EVT_STEP);
+
+                    longjmp(jmp_env, 1);
+                }
+
+                if (!dbg_continue_after_bp) {
+                    check_breakpoint(BPT_M68K_E, 1, address, address);
+                }
+
+                if (dbg_req_core->dbg_paused) {
+                    dbg_continue_after_bp = 1;
+
+                    longjmp(jmp_env, 1);
+                }
+                else {
+                    if (dbg_continue_after_bp) {
+                        dbg_continue_after_bp = 0;
+                    }
                 }
             }
-        }
-        else {
-            send_dbg_event(address, DBG_EVT_PAUSED);
+            else {
+                send_dbg_event(address, DBG_EVT_PAUSED);
 
-            longjmp(jmp_env, 1);
+                longjmp(jmp_env, 1);
+            }
+        } break;
+        default: {
+            check_breakpoint(type, width, address, value);
         }
-    } break;
-    default: {
-        check_breakpoint(type, width, address, value);
-    }
     }
 }
 

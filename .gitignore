@@ -24,3 +24,4 @@ sdl/build_sdl2
 
 x64/
 Win32/
+Release/

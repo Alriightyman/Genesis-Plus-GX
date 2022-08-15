@@ -1026,25 +1026,30 @@ int GetInputMapping(int input)
 
 int GetPaletteEntry(int index)
 {
+    // Add CRAM Viewer
     return 0;
 }
 
 unsigned char GetVDPRegisterValue(int index)
 {
+    // Add VDP Register Viewer
     return 0;
 }
 
 unsigned int Disassemble(unsigned int address, char* text)
 {
+    // Add disassemble
     return 0;
 }
 
 void SetVolume(int vol, int isdebugVol)
 {
+    // Add Volume changing
 }
 
 void PauseAudio(int pause)
 {
+    // Add Audio pausing
 }
 
 int AddBreakpoint(int addr)
@@ -1097,18 +1102,18 @@ void ClearBreakpoints()
 
 int AddWatchpoint(int fromAddr, int toAddr)
 {
-    // TODO: add breakpoint debugging
+    // TODO: add watchpoints
     return 0;
 }
 
 void ClearWatchpoint(int fromAddr)
 {
-    // TODO: add breakpoint debugging
+    // TODO: add watchpoints
 }
 
 void ClearWatchpoints()
 {
-    // TODO: add breakpoint debugging
+    // TODO: add watchpoints
 }
 
 int StepInto()
@@ -1144,25 +1149,28 @@ int IsDebugging()
 
 unsigned int* GetProfilerResults(int* instructionCount)
 {
-    // TODO: add breakpoint debugging
+    // TODO: add profiling
     *instructionCount = 0;
     return NULL;
 }
 
 unsigned int GetInstructionCycleCount(unsigned int address)
 {
-    // TODO: add breakpoint debugging
+    // TODO: add profiling
     return 0;
 }
 
 unsigned char* GetVRAM()
 {
+    // Add Vram plane viewer
     return NULL;
 }
 
 #pragma endregion
 
 #pragma region init and update
+
+int old_ticks = 0;
 
 int Update()
 {
@@ -1207,13 +1215,23 @@ int Update()
         }
     }
 
-    sdl_video_update();
-    sdl_sound_update(use_sound);
-
-    if (!turbo_mode && sdl_sync.sem_sync && sdl_video.frames_rendered % 3 == 0)
+    int current = SDL_GetTicks();
+    int delta = current - old_ticks;
+ 
+    // lock at 60 fps
+    if (delta > 1000 / 60.0f)
     {
-        SDL_SemWait(sdl_sync.sem_sync);
+        sdl_video_update();
+        sdl_sound_update(use_sound);
+        old_ticks = current;
     }
+
+    // leaving this commented out - seems to not render as well as it claims.
+    /*if (!turbo_mode && sdl_sync.sem_sync && sdl_video.frames_rendered % 3 == 0)
+    {
+        printf("Frames: %d\n", sdl_video.frames_rendered);
+        SDL_SemWait(sdl_sync.sem_sync);
+    }*/
 
     process_request();
 
@@ -1369,6 +1387,12 @@ int Init(int width, int height, void* parent, int pal, char region, int use_game
     windowHeight = height;
     windowWidth = width;
 
+#ifdef _DEBUG
+    AllocConsole();
+    freopen("CONIN$", "r", stdin);
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+#endif
     FILE* fp;
 
     /* set default config */
