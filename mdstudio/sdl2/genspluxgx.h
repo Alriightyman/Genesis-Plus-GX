@@ -81,6 +81,7 @@ extern "C" {
 	extern unsigned char GetVDPRegisterValue(int index);
 
 	extern unsigned int Disassemble(unsigned int address, char* text);
+	extern int CleanupBreakpoints(unsigned int* addresses);
 
 	extern void SetVolume(int vol, int isdebugVol);
 	extern void PauseAudio(int pause);

@@ -69,6 +69,8 @@ static breakpoint_t *add_bpt(bpt_type_t type, unsigned int address, int width) {
         bp->prev = bp;
     }
 
+    printf("breakpoint added at %d\n", address);
+
     return bp;
 }
 
@@ -107,7 +109,14 @@ static void remove_bpt(unsigned int address, bpt_type_t type)
 {
     breakpoint_t *bpt;
     if ((bpt = find_breakpoint(address, type)))
+    {
         delete_breakpoint(bpt);
+        printf("breakpoint at addr %d deleted\n", address);
+    }
+    else
+    {
+        printf("Could not find breakpoint at address %d\n", address);
+    }
 }
 
 static int count_bpt_list()
@@ -324,303 +333,332 @@ static unsigned int calc_step(int is_step_in) {
     return dest_pc;
 }
 
-void process_request()
+request_type_t dequeue_req()
 {
-    if (!dbg_req_core || dbg_req_core->dbg_active != 1)
-        return;
-
-    if (dbg_req_core->req_type == REQ_NO_REQUEST)
-        return;
-
-    switch (dbg_req_core->req_type)
+    request_type_t req = REQ_NO_REQUEST;
+    //if (dbg_req_core->num_reqs > 0)
+    if(dbg_req_core->request_queue != NULL)
     {
-    case REQ_GET_REG:
-    {
-        register_data_t *regs_data = &dbg_req_core->regs_data;
-
-        if (regs_data->type & REG_TYPE_M68K)
-            regs_data->any_reg.val = m68k_get_reg((m68k_register_t)regs_data->any_reg.index);
-        if (regs_data->type & REG_TYPE_VDP)
-            regs_data->any_reg.val = reg[regs_data->any_reg.index];
-        if (regs_data->type & REG_TYPE_Z80)
-        {
-            if (regs_data->any_reg.index >= 0 && regs_data->any_reg.index <= 12) // PC <-> HL2
-            {
-                regs_data->any_reg.val = ((unsigned int *)&Z80.pc)[regs_data->any_reg.index];
-            }
-            else if (regs_data->any_reg.index >= 13 && regs_data->any_reg.index <= 19) // R <-> I
-            {
-                regs_data->any_reg.val = ((unsigned char *)&Z80.r)[regs_data->any_reg.index - 13];
-            }
-        }
-        
-    } break;
-    case REQ_SET_REG:
-    {
-        register_data_t *regs_data = &dbg_req_core->regs_data;
-
-        if (regs_data->type & REG_TYPE_M68K)
-            m68k_set_reg((m68k_register_t)regs_data->any_reg.index, regs_data->any_reg.val);
-        if (regs_data->type & REG_TYPE_VDP)
-            reg[regs_data->any_reg.index] = regs_data->any_reg.val;
-        if (regs_data->type & REG_TYPE_Z80)
-        {
-            if (regs_data->any_reg.index >= 0 && regs_data->any_reg.index <= 12) // PC <-> HL2
-            {
-                ((unsigned int *)&Z80.pc)[regs_data->any_reg.index] = regs_data->any_reg.val;
-            }
-            else if (regs_data->any_reg.index >= 13 && regs_data->any_reg.index <= 19) // R <-> I
-            {
-                ((unsigned char *)&Z80.r)[regs_data->any_reg.index - 13] = regs_data->any_reg.val & 0xFF;
-            }
-        }
-    } break;
-    case REQ_GET_REGS:
-    case REQ_SET_REGS:
-    {
-        register_data_t *regs_data = &dbg_req_core->regs_data;
-
-        if (regs_data->type & REG_TYPE_M68K)
-        {
-            regs_68k_data_t *m68kr = &regs_data->regs_68k;
-
-            if (dbg_req_core->req_type == REQ_GET_REGS)
-            {
-                m68kr->d0 = m68k_get_reg(M68K_REG_D0);
-                m68kr->d1 = m68k_get_reg(M68K_REG_D1);
-                m68kr->d2 = m68k_get_reg(M68K_REG_D2);
-                m68kr->d3 = m68k_get_reg(M68K_REG_D3);
-                m68kr->d4 = m68k_get_reg(M68K_REG_D4);
-                m68kr->d5 = m68k_get_reg(M68K_REG_D5);
-                m68kr->d6 = m68k_get_reg(M68K_REG_D6);
-                m68kr->d7 = m68k_get_reg(M68K_REG_D7);
-
-                m68kr->a0 = m68k_get_reg(M68K_REG_A0);
-                m68kr->a1 = m68k_get_reg(M68K_REG_A1);
-                m68kr->a2 = m68k_get_reg(M68K_REG_A2);
-                m68kr->a3 = m68k_get_reg(M68K_REG_A3);
-                m68kr->a4 = m68k_get_reg(M68K_REG_A4);
-                m68kr->a5 = m68k_get_reg(M68K_REG_A5);
-                m68kr->a6 = m68k_get_reg(M68K_REG_A6);
-                m68kr->a7 = m68k_get_reg(M68K_REG_A7);
-
-                m68kr->pc = m68k_get_reg(M68K_REG_PC);
-                m68kr->sr = m68k_get_reg(M68K_REG_SR);
-                m68kr->sp = m68k_get_reg(M68K_REG_SP);
-                m68kr->usp = m68k_get_reg(M68K_REG_USP);
-                m68kr->isp = m68k_get_reg(M68K_REG_ISP);
-                m68kr->ppc = m68k_get_reg(M68K_REG_PPC);
-                m68kr->ir = m68k_get_reg(M68K_REG_IR);
-            }
-            else
-            {
-                m68k_set_reg(M68K_REG_D0, m68kr->d0);
-                m68k_set_reg(M68K_REG_D1, m68kr->d1);
-                m68k_set_reg(M68K_REG_D2, m68kr->d2);
-                m68k_set_reg(M68K_REG_D3, m68kr->d3);
-                m68k_set_reg(M68K_REG_D4, m68kr->d4);
-                m68k_set_reg(M68K_REG_D5, m68kr->d5);
-                m68k_set_reg(M68K_REG_D6, m68kr->d6);
-                m68k_set_reg(M68K_REG_D7, m68kr->d7);
-
-                m68k_set_reg(M68K_REG_A0, m68kr->a0);
-                m68k_set_reg(M68K_REG_A1, m68kr->a1);
-                m68k_set_reg(M68K_REG_A2, m68kr->a2);
-                m68k_set_reg(M68K_REG_A3, m68kr->a3);
-                m68k_set_reg(M68K_REG_A4, m68kr->a4);
-                m68k_set_reg(M68K_REG_A5, m68kr->a5);
-                m68k_set_reg(M68K_REG_A6, m68kr->a6);
-                m68k_set_reg(M68K_REG_A7, m68kr->a7);
-
-                m68k_set_reg(M68K_REG_PC, m68kr->pc);
-                m68k_set_reg(M68K_REG_SR, m68kr->sr);
-                m68k_set_reg(M68K_REG_SP, m68kr->sp);
-                m68k_set_reg(M68K_REG_USP, m68kr->usp);
-                m68k_set_reg(M68K_REG_ISP, m68kr->isp);
-            }
-        }
-        if (regs_data->type & REG_TYPE_VDP)
-        {
-            vdp_regs_t *vdp_regs = &regs_data->vdp_regs;
-            for (int i = 0; i < (sizeof(vdp_regs) / sizeof(vdp_regs->regs_vdp[0])); ++i)
-            {
-                if (dbg_req_core->req_type == REQ_GET_REGS)
-                    vdp_regs->regs_vdp[i] = reg[i];
-                else
-                    reg[i] = vdp_regs->regs_vdp[i];
-            }
-
-            if (dbg_req_core->req_type == REQ_GET_REGS)
-            {
-                vdp_regs->dma_len = (reg[20] << 8) | reg[19];
-                if (!vdp_regs->dma_len)
-                    vdp_regs->dma_len = 0x10000;
-
-                vdp_regs->dma_src = vdp_dma_calc_src();
-                vdp_regs->dma_dst = vdp_dma_get_dst();
-            }
-        }
-        if (regs_data->type & REG_TYPE_Z80)
-        {
-            regs_z80_data_t *z80r = &regs_data->regs_z80;
-            if (dbg_req_core->req_type == REQ_GET_REGS)
-            {
-                z80r->pc = Z80.pc.d;
-                z80r->sp = Z80.sp.d;
-                z80r->af = Z80.af.d;
-                z80r->bc = Z80.bc.d;
-                z80r->de = Z80.de.d;
-                z80r->hl = Z80.hl.d;
-                z80r->ix = Z80.ix.d;
-                z80r->iy = Z80.iy.d;
-                z80r->wz = Z80.wz.d;
-                z80r->af2 = Z80.af2.d;
-                z80r->bc2 = Z80.bc2.d;
-                z80r->de2 = Z80.de2.d;
-                z80r->hl2 = Z80.hl2.d;
-                z80r->r = Z80.r;
-                z80r->r2 = Z80.r2;
-                z80r->iff1 = Z80.iff1;
-                z80r->iff2 = Z80.iff2;
-                z80r->halt = Z80.halt;
-                z80r->im = Z80.im;
-                z80r->i = Z80.i;
-            }
-            else
-            {
-                Z80.pc.d = z80r->pc;
-                Z80.sp.d = z80r->sp;
-                Z80.af.d = z80r->af;
-                Z80.bc.d = z80r->bc;
-                Z80.de.d = z80r->de;
-                Z80.hl.d = z80r->hl;
-                Z80.ix.d = z80r->ix;
-                Z80.iy.d = z80r->iy;
-                Z80.wz.d = z80r->wz;
-                Z80.af2.d = z80r->af2;
-                Z80.bc2.d = z80r->bc2;
-                Z80.de2.d = z80r->de2;
-                Z80.hl2.d = z80r->hl2;
-                Z80.r = z80r->r;
-                Z80.r2 = z80r->r2;
-                Z80.iff1 = z80r->iff1;
-                Z80.iff2 = z80r->iff2;
-                Z80.halt = z80r->halt;
-                Z80.im = z80r->im;
-                Z80.i = z80r->i;
-            }
-        }
-    } break;
-    case REQ_READ_68K_ROM:
-    case REQ_READ_68K_RAM:
-    case REQ_READ_Z80:
-    {
-        dbg_dont_check_bp = 1;
-
-        memory_data_t *mem_data = &dbg_req_core->mem_data;
-        for (int i = 0; i < mem_data->size; ++i)
-        {
-            switch (dbg_req_core->req_type)
-            {
-            case REQ_READ_68K_ROM: mem_data->m68k_rom[mem_data->address + i] = m68ki_read_8(mem_data->address + i); break;
-            case REQ_READ_68K_RAM: mem_data->m68k_ram[(mem_data->address + i) & 0xFFFF] = m68ki_read_8(mem_data->address + i); break;
-            case REQ_READ_Z80: mem_data->z80_ram[(mem_data->address + i) & 0x1FFF] = z80_readmem(mem_data->address + i); break;
-            default:
-                break;
-            }
-        }
-
-        dbg_dont_check_bp = 0;
-    } break;
-    case REQ_WRITE_68K_ROM:
-    case REQ_WRITE_68K_RAM:
-    case REQ_WRITE_Z80:
-    {
-        dbg_dont_check_bp = 1;
-
-        memory_data_t *mem_data = &dbg_req_core->mem_data;
-        for (int i = 0; i < mem_data->size; ++i)
-        {
-            switch (dbg_req_core->req_type)
-            {
-            case REQ_WRITE_68K_ROM: m68ki_write_8(mem_data->address + i, mem_data->m68k_rom[mem_data->address + i]); break;
-            case REQ_WRITE_68K_RAM: m68ki_write_8(0xFF0000 | ((mem_data->address + i) & 0xFFFF), mem_data->m68k_ram[(mem_data->address + i) & 0xFFFF]); break;
-            case REQ_WRITE_Z80: z80_writemem(mem_data->address + i, mem_data->z80_ram[(mem_data->address + i) & 0x1FFF]); break;
-            default:
-                break;
-            }
-        }
-
-        dbg_dont_check_bp = 0;
-    } break;
-    case REQ_ADD_BREAK:
-    {
-        bpt_data_t *bpt_data = &dbg_req_core->bpt_data;
-        if (!find_breakpoint(bpt_data->address, bpt_data->type))
-            add_bpt(bpt_data->type, bpt_data->address, bpt_data->width);
-    } break;
-    case REQ_TOGGLE_BREAK:
-    {
-        bpt_data_t *bpt_data = &dbg_req_core->bpt_data;
-        breakpoint_t *bp = find_breakpoint(bpt_data->address, bpt_data->type);
-
-        if (bp != NULL)
-            bp->enabled = !bp->enabled;
-    } break;
-    case REQ_DEL_BREAK:
-    {
-        bpt_data_t *bpt_data = &dbg_req_core->bpt_data;
-        remove_bpt(bpt_data->address, bpt_data->type);
-    } break;
-    case REQ_CLEAR_BREAKS:
-        clear_bpt_list();
-    case REQ_LIST_BREAKS:
-    {
-        bpt_list_t *bpt_list = &dbg_req_core->bpt_list;
-        bpt_list->count = count_bpt_list();
-        for (int i = 0; i < bpt_list->count; ++i)
-            get_bpt_data(i, &bpt_list->breaks[i]);
-    } break;
-    case REQ_ATTACH:
-        activate_debugger();
-        dbg_req_core->dbg_paused = 1;
-        break;
-    case REQ_PAUSE:
-        pause_debugger();
-        break;
-    case REQ_RESUME:
-        resume_debugger();
-        break;
-    case REQ_STOP:
-        stop_debugging();
-        break;
-    case REQ_STEP_INTO:
-    case REQ_STEP_OVER:
-    {
-        if (dbg_req_core && dbg_req_core->dbg_paused && !dbg_in_interrupt)
-        {
-            unsigned int dest_pc = calc_step(dbg_req_core->req_type == REQ_STEP_INTO);
-
-            if (dest_pc != (unsigned int)(-1) && dbg_req_core->req_type != REQ_STEP_INTO)
-            {
-                dbg_step_over = 1;
-                dbg_step_over_addr = dest_pc;
-            }
-            else
-            {
-                dbg_step_over = 0;
-                dbg_step_over_addr = 0;
-                dbg_trace = 1;
-            }
-
-            dbg_req_core->dbg_paused = 0;
-        }
-    } break;
-    default:
-        break;
+        request_data* data = dbg_req_core->request_queue;
+        dbg_req_core->request_queue = data->next;
+        req = data->type;
+        free(data);
     }
 
-    dbg_req_core->req_type = REQ_NO_REQUEST;
+    return req;
+}
+
+void process_request()
+{
+    request_type_t curr_req = REQ_NO_REQUEST;
+
+    do
+    {
+        if (!dbg_req_core || dbg_req_core->dbg_active != 1 || dbg_req_core->updating == 1)
+            return;
+
+        curr_req = dequeue_req();
+
+        if (curr_req == REQ_NO_REQUEST)
+            return;
+
+        switch (curr_req)
+        {
+        case REQ_GET_REG:
+        {
+            register_data_t* regs_data = &dbg_req_core->regs_data;
+
+            if (regs_data->type & REG_TYPE_M68K)
+                regs_data->any_reg.val = m68k_get_reg((m68k_register_t)regs_data->any_reg.index);
+            if (regs_data->type & REG_TYPE_VDP)
+                regs_data->any_reg.val = reg[regs_data->any_reg.index];
+            if (regs_data->type & REG_TYPE_Z80)
+            {
+                if (regs_data->any_reg.index >= 0 && regs_data->any_reg.index <= 12) // PC <-> HL2
+                {
+                    regs_data->any_reg.val = ((unsigned int*)&Z80.pc)[regs_data->any_reg.index];
+                }
+                else if (regs_data->any_reg.index >= 13 && regs_data->any_reg.index <= 19) // R <-> I
+                {
+                    regs_data->any_reg.val = ((unsigned char*)&Z80.r)[regs_data->any_reg.index - 13];
+                }
+            }
+
+        } break;
+        case REQ_SET_REG:
+        {
+            register_data_t* regs_data = &dbg_req_core->regs_data;
+
+            if (regs_data->type & REG_TYPE_M68K)
+                m68k_set_reg((m68k_register_t)regs_data->any_reg.index, regs_data->any_reg.val);
+            if (regs_data->type & REG_TYPE_VDP)
+                reg[regs_data->any_reg.index] = regs_data->any_reg.val;
+            if (regs_data->type & REG_TYPE_Z80)
+            {
+                if (regs_data->any_reg.index >= 0 && regs_data->any_reg.index <= 12) // PC <-> HL2
+                {
+                    ((unsigned int*)&Z80.pc)[regs_data->any_reg.index] = regs_data->any_reg.val;
+                }
+                else if (regs_data->any_reg.index >= 13 && regs_data->any_reg.index <= 19) // R <-> I
+                {
+                    ((unsigned char*)&Z80.r)[regs_data->any_reg.index - 13] = regs_data->any_reg.val & 0xFF;
+                }
+            }
+        } break;
+        case REQ_GET_REGS:
+        case REQ_SET_REGS:
+        {
+            register_data_t* regs_data = &dbg_req_core->regs_data;
+
+            if (regs_data->type & REG_TYPE_M68K)
+            {
+                regs_68k_data_t* m68kr = &regs_data->regs_68k;
+
+                if (curr_req == REQ_GET_REGS)
+                {
+                    m68kr->d0 = m68k_get_reg(M68K_REG_D0);
+                    m68kr->d1 = m68k_get_reg(M68K_REG_D1);
+                    m68kr->d2 = m68k_get_reg(M68K_REG_D2);
+                    m68kr->d3 = m68k_get_reg(M68K_REG_D3);
+                    m68kr->d4 = m68k_get_reg(M68K_REG_D4);
+                    m68kr->d5 = m68k_get_reg(M68K_REG_D5);
+                    m68kr->d6 = m68k_get_reg(M68K_REG_D6);
+                    m68kr->d7 = m68k_get_reg(M68K_REG_D7);
+
+                    m68kr->a0 = m68k_get_reg(M68K_REG_A0);
+                    m68kr->a1 = m68k_get_reg(M68K_REG_A1);
+                    m68kr->a2 = m68k_get_reg(M68K_REG_A2);
+                    m68kr->a3 = m68k_get_reg(M68K_REG_A3);
+                    m68kr->a4 = m68k_get_reg(M68K_REG_A4);
+                    m68kr->a5 = m68k_get_reg(M68K_REG_A5);
+                    m68kr->a6 = m68k_get_reg(M68K_REG_A6);
+                    m68kr->a7 = m68k_get_reg(M68K_REG_A7);
+
+                    m68kr->pc = m68k_get_reg(M68K_REG_PC);
+                    m68kr->sr = m68k_get_reg(M68K_REG_SR);
+                    m68kr->sp = m68k_get_reg(M68K_REG_SP);
+                    m68kr->usp = m68k_get_reg(M68K_REG_USP);
+                    m68kr->isp = m68k_get_reg(M68K_REG_ISP);
+                    m68kr->ppc = m68k_get_reg(M68K_REG_PPC);
+                    m68kr->ir = m68k_get_reg(M68K_REG_IR);
+                }
+                else
+                {
+                    m68k_set_reg(M68K_REG_D0, m68kr->d0);
+                    m68k_set_reg(M68K_REG_D1, m68kr->d1);
+                    m68k_set_reg(M68K_REG_D2, m68kr->d2);
+                    m68k_set_reg(M68K_REG_D3, m68kr->d3);
+                    m68k_set_reg(M68K_REG_D4, m68kr->d4);
+                    m68k_set_reg(M68K_REG_D5, m68kr->d5);
+                    m68k_set_reg(M68K_REG_D6, m68kr->d6);
+                    m68k_set_reg(M68K_REG_D7, m68kr->d7);
+
+                    m68k_set_reg(M68K_REG_A0, m68kr->a0);
+                    m68k_set_reg(M68K_REG_A1, m68kr->a1);
+                    m68k_set_reg(M68K_REG_A2, m68kr->a2);
+                    m68k_set_reg(M68K_REG_A3, m68kr->a3);
+                    m68k_set_reg(M68K_REG_A4, m68kr->a4);
+                    m68k_set_reg(M68K_REG_A5, m68kr->a5);
+                    m68k_set_reg(M68K_REG_A6, m68kr->a6);
+                    m68k_set_reg(M68K_REG_A7, m68kr->a7);
+
+                    m68k_set_reg(M68K_REG_PC, m68kr->pc);
+                    m68k_set_reg(M68K_REG_SR, m68kr->sr);
+                    m68k_set_reg(M68K_REG_SP, m68kr->sp);
+                    m68k_set_reg(M68K_REG_USP, m68kr->usp);
+                    m68k_set_reg(M68K_REG_ISP, m68kr->isp);
+                }
+            }
+            if (regs_data->type & REG_TYPE_VDP)
+            {
+                vdp_regs_t* vdp_regs = &regs_data->vdp_regs;
+                for (int i = 0; i < (sizeof(vdp_regs) / sizeof(vdp_regs->regs_vdp[0])); ++i)
+                {
+                    if (curr_req == REQ_GET_REGS)
+                        vdp_regs->regs_vdp[i] = reg[i];
+                    else
+                        reg[i] = vdp_regs->regs_vdp[i];
+                }
+
+                if (curr_req == REQ_GET_REGS)
+                {
+                    vdp_regs->dma_len = (reg[20] << 8) | reg[19];
+                    if (!vdp_regs->dma_len)
+                        vdp_regs->dma_len = 0x10000;
+
+                    vdp_regs->dma_src = vdp_dma_calc_src();
+                    vdp_regs->dma_dst = vdp_dma_get_dst();
+                }
+            }
+            if (regs_data->type & REG_TYPE_Z80)
+            {
+                regs_z80_data_t* z80r = &regs_data->regs_z80;
+                if (curr_req == REQ_GET_REGS)
+                {
+                    z80r->pc = Z80.pc.d;
+                    z80r->sp = Z80.sp.d;
+                    z80r->af = Z80.af.d;
+                    z80r->bc = Z80.bc.d;
+                    z80r->de = Z80.de.d;
+                    z80r->hl = Z80.hl.d;
+                    z80r->ix = Z80.ix.d;
+                    z80r->iy = Z80.iy.d;
+                    z80r->wz = Z80.wz.d;
+                    z80r->af2 = Z80.af2.d;
+                    z80r->bc2 = Z80.bc2.d;
+                    z80r->de2 = Z80.de2.d;
+                    z80r->hl2 = Z80.hl2.d;
+                    z80r->r = Z80.r;
+                    z80r->r2 = Z80.r2;
+                    z80r->iff1 = Z80.iff1;
+                    z80r->iff2 = Z80.iff2;
+                    z80r->halt = Z80.halt;
+                    z80r->im = Z80.im;
+                    z80r->i = Z80.i;
+                }
+                else
+                {
+                    Z80.pc.d = z80r->pc;
+                    Z80.sp.d = z80r->sp;
+                    Z80.af.d = z80r->af;
+                    Z80.bc.d = z80r->bc;
+                    Z80.de.d = z80r->de;
+                    Z80.hl.d = z80r->hl;
+                    Z80.ix.d = z80r->ix;
+                    Z80.iy.d = z80r->iy;
+                    Z80.wz.d = z80r->wz;
+                    Z80.af2.d = z80r->af2;
+                    Z80.bc2.d = z80r->bc2;
+                    Z80.de2.d = z80r->de2;
+                    Z80.hl2.d = z80r->hl2;
+                    Z80.r = z80r->r;
+                    Z80.r2 = z80r->r2;
+                    Z80.iff1 = z80r->iff1;
+                    Z80.iff2 = z80r->iff2;
+                    Z80.halt = z80r->halt;
+                    Z80.im = z80r->im;
+                    Z80.i = z80r->i;
+                }
+            }
+        } break;
+        case REQ_READ_68K_ROM:
+        case REQ_READ_68K_RAM:
+        case REQ_READ_Z80:
+        {
+            dbg_dont_check_bp = 1;
+
+            memory_data_t* mem_data = &dbg_req_core->mem_data;
+            for (int i = 0; i < mem_data->size; ++i)
+            {
+                switch (curr_req)
+                {
+                case REQ_READ_68K_ROM: mem_data->m68k_rom[mem_data->address + i] = m68ki_read_8(mem_data->address + i); break;
+                case REQ_READ_68K_RAM: mem_data->m68k_ram[(mem_data->address + i) & 0xFFFF] = m68ki_read_8(mem_data->address + i); break;
+                case REQ_READ_Z80: mem_data->z80_ram[(mem_data->address + i) & 0x1FFF] = z80_readmem(mem_data->address + i); break;
+                default:
+                    break;
+                }
+            }
+
+            dbg_dont_check_bp = 0;
+        } break;
+        case REQ_WRITE_68K_ROM:
+        case REQ_WRITE_68K_RAM:
+        case REQ_WRITE_Z80:
+        {
+            dbg_dont_check_bp = 1;
+
+            memory_data_t* mem_data = &dbg_req_core->mem_data;
+            for (int i = 0; i < mem_data->size; ++i)
+            {
+                switch (curr_req)
+                {
+                case REQ_WRITE_68K_ROM: m68ki_write_8(mem_data->address + i, mem_data->m68k_rom[mem_data->address + i]); break;
+                case REQ_WRITE_68K_RAM: m68ki_write_8(0xFF0000 | ((mem_data->address + i) & 0xFFFF), mem_data->m68k_ram[(mem_data->address + i) & 0xFFFF]); break;
+                case REQ_WRITE_Z80: z80_writemem(mem_data->address + i, mem_data->z80_ram[(mem_data->address + i) & 0x1FFF]); break;
+                default:
+                    break;
+                }
+            }
+
+            dbg_dont_check_bp = 0;
+        } break;
+        case REQ_ADD_BREAK:
+        {
+            bpt_data_t* bpt_data = &dbg_req_core->bpt_data;
+            if (!find_breakpoint(bpt_data->address, bpt_data->type))
+                add_bpt(bpt_data->type, bpt_data->address, bpt_data->width);
+        } break;
+        case REQ_TOGGLE_BREAK:
+        {
+            bpt_data_t* bpt_data = &dbg_req_core->bpt_data;
+            breakpoint_t* bp = find_breakpoint(bpt_data->address, bpt_data->type);
+
+            if (bp != NULL)
+                bp->enabled = !bp->enabled;
+        } break;
+        case REQ_DEL_BREAK:
+        {
+            bpt_data_t* bpt_data = &dbg_req_core->bpt_data;
+            remove_bpt(bpt_data->address, bpt_data->type);
+        } break;
+        case REQ_CLEAR_BREAKS:
+            clear_bpt_list();
+        case REQ_LIST_BREAKS:
+        {
+            bpt_list_t* bpt_list = &dbg_req_core->bpt_list;
+            bpt_list->count = count_bpt_list();
+
+            printf("\nBreakpoint List: %d\n", bpt_list->count);
+
+            for (int i = 0; i < bpt_list->count; ++i)
+            {
+                get_bpt_data(i, &bpt_list->breaks[i]);
+                printf("Breakpoint %d addr %d\n", i, bpt_list->breaks[i].address);
+            }
+        } break;
+        case REQ_ATTACH:
+            activate_debugger();
+            dbg_req_core->dbg_paused = 1;
+            break;
+        case REQ_PAUSE:
+            pause_debugger();
+            break;
+        case REQ_RESUME:
+            resume_debugger();
+            break;
+        case REQ_STOP:
+            stop_debugging();
+            break;
+        case REQ_STEP_INTO:
+        case REQ_STEP_OVER:
+        {
+            if (dbg_req_core && dbg_req_core->dbg_paused && !dbg_in_interrupt)
+            {
+                unsigned int dest_pc = calc_step(curr_req == REQ_STEP_INTO);
+
+                if (dest_pc != (unsigned int)(-1) && curr_req != REQ_STEP_INTO)
+                {
+                    dbg_step_over = 1;
+                    dbg_step_over_addr = dest_pc;
+                }
+                else
+                {
+                    dbg_step_over = 0;
+                    dbg_step_over_addr = 0;
+                    dbg_trace = 1;
+                }
+
+                dbg_req_core->dbg_paused = 0;
+            }
+        } break;
+        default:
+            break;
+        }
+
+    }while (curr_req != REQ_NO_REQUEST);
+
+    //dbg_req_core->last_req_type = REQ_NO_REQUEST;
 }
 
 void stop_debugging()

@@ -39,6 +39,7 @@ int turbo_mode  = 0;
 int use_sound   = 1;
 int fullscreen = 0;// SDL_WINDOW_FULLSCREEN;
 SDL_TimerID sdl_timer_id = NULL;
+SDL_AudioDeviceID audioDeviceId = 0;
 
 typedef struct
 {
@@ -90,13 +91,15 @@ struct {
 } sdl_sound;
 
 
-void CheckForError()
+int CheckForError()
 {
     const char* error = SDL_GetError();
     if (strcmp(error,"") != 0)
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", error, NULL);
+        return 1;
     }
+    return 0;
 }
 
 
@@ -133,6 +136,7 @@ static int sdl_sound_init()
 {
     int n;
     SDL_AudioSpec as_desired;
+    SDL_AudioSpec output;
 
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "SDL Audio initialization failed", sdl_video.window);
@@ -145,7 +149,9 @@ static int sdl_sound_init()
     as_desired.samples = SOUND_SAMPLES_SIZE;
     as_desired.callback = sdl_sound_callback;
 
-    if (SDL_OpenAudio(&as_desired, NULL) < 0) {
+    audioDeviceId = SDL_OpenAudioDevice(NULL, 0, &as_desired, &output, 0);
+    if(audioDeviceId <= 0) {
+    //if (SDL_OpenAudio(&as_desired, NULL) < 0) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "SDL Audio open failed", sdl_video.window);
         return 0;
     }
@@ -171,7 +177,8 @@ static void sdl_sound_update(int enabled)
         int i;
         short* out;
 
-        SDL_LockAudio();
+        //SDL_LockAudio();
+        SDL_LockAudioDevice(audioDeviceId);
         out = (short*)sdl_sound.current_pos;
         for (i = 0; i < size; i++)
         {
@@ -179,13 +186,15 @@ static void sdl_sound_update(int enabled)
         }
         sdl_sound.current_pos = (char*)out;
         sdl_sound.current_emulated_samples += size * sizeof(short);
-        SDL_UnlockAudio();
+        //SDL_UnlockAudio();
+        SDL_UnlockAudioDevice(audioDeviceId);
     }
 }
 
 static void sdl_sound_close()
 {
-    SDL_PauseAudio(1);
+    //SDL_PauseAudio(1);
+    SDL_PauseAudioDevice(audioDeviceId, 1);
     SDL_CloseAudio();
     if (sdl_sound.buffer)
         free(sdl_sound.buffer);
@@ -214,21 +223,35 @@ static int sdl_video_init()
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "SDL Video initialization failed", sdl_video.window);
         return 0;
     }
-    CheckForError();
-    sdl_video.window = SDL_CreateWindow("GPGX", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, SDL_WINDOW_HIDDEN | SDL_WINDOW_INPUT_FOCUS );
 
-    CheckForError();
+    if (CheckForError())
+        return 0;
+
+    sdl_video.window = SDL_CreateWindow("Genesis Plus GX", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN | SDL_WINDOW_INPUT_FOCUS );
+    if (sdl_video.window == NULL)
+    {
+        sdl_video.window = SDL_CreateWindow("Genesis Plus GX", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_INPUT_FOCUS);        
+    }
+
+    if (CheckForError())
+        return 0;
+
 #ifdef ALT_SDL_RENDERER
     sdl_video.renderer = SDL_CreateRenderer(sdl_video.window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
-    CheckForError();
+
+    if (CheckForError())
+        return 0;
+    
     sdl_video.back_buffer = SDL_CreateTexture(sdl_video.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, windowWidth, windowHeight);
-    CheckForError();
+    
+    if (CheckForError())
+        return 0;
 #else
     sdl_video.surf_screen = SDL_GetWindowSurface(sdl_video.window);
     sdl_video.surf_bitmap = SDL_CreateRGBSurfaceWithFormat(0, VIDEO_WIDTH, VIDEO_HEIGHT, SDL_BITSPERPIXEL(surface_format), surface_format);
     sdl_video.frames_rendered = 0;
 #endif // ALT_SDL_RENDER
-    SDL_ShowCursor(0);
+    //SDL_ShowCursor(0);
     return 1;
 }
 
@@ -1049,7 +1072,7 @@ void SetVolume(int vol, int isdebugVol)
 
 void PauseAudio(int pause)
 {
-    // Add Audio pausing
+    use_sound = !pause;
 }
 
 int AddBreakpoint(int addr)
@@ -1068,7 +1091,7 @@ int AddBreakpoint(int addr)
         forceProcessRequest = 1;
     }
 
-    send_dbg_request_forced(dbg_req_core, REQ_ADD_BREAK, forceProcessRequest);
+    send_dbg_request_forced(dbg_req_core, REQ_ADD_BREAK, 1);
     return 0;
 }
 
@@ -1085,7 +1108,7 @@ void ClearBreakpoint(int addr)
         forceProcessRequest = 1;
     }
 
-    send_dbg_request_forced(dbg_req_core, REQ_DEL_BREAK, forceProcessRequest);
+    send_dbg_request_forced(dbg_req_core, REQ_DEL_BREAK, 1);
 }
 
 void ClearBreakpoints()
@@ -1097,7 +1120,7 @@ void ClearBreakpoints()
         forceProcessRequest = 1;
     }
 
-    send_dbg_request_forced(dbg_req_core, REQ_CLEAR_BREAKS, forceProcessRequest);
+    send_dbg_request_forced(dbg_req_core, REQ_CLEAR_BREAKS, 1);
 }
 
 int AddWatchpoint(int fromAddr, int toAddr)
@@ -1118,27 +1141,19 @@ void ClearWatchpoints()
 
 int StepInto()
 {
-    if (!is_debugger_paused())
-    {
-        // force pause
-        send_dbg_request_forced(dbg_req_core, REQ_PAUSE, 0);
-    }
-    else
-    {
-        send_dbg_request_forced(dbg_req_core, REQ_STEP_INTO, 0);
-    }
+    send_dbg_request_forced(dbg_req_core, REQ_STEP_INTO, 1);
     return 0;
 }
 
 int Resume()
 {
-    send_dbg_request_forced(dbg_req_core, REQ_RESUME, 0);
+    send_dbg_request_forced(dbg_req_core, REQ_RESUME, 1);
     return 0;
 }
 
 int Break()
 {
-    send_dbg_request_forced(dbg_req_core, REQ_PAUSE, 0);
+    send_dbg_request_forced(dbg_req_core, REQ_PAUSE, 1);
     return 0;
 }
 
@@ -1166,6 +1181,19 @@ unsigned char* GetVRAM()
     return NULL;
 }
 
+int CleanupBreakpoints(unsigned int* addresses)
+{
+    send_dbg_request_forced(dbg_req_core, REQ_LIST_BREAKS, 1);   
+
+    for (int i = 0; i < dbg_req_core->bpt_list.count; i++)
+    {
+        bpt_data_t b = dbg_req_core->bpt_list.breaks[i];     
+        addresses[i] = b.address;
+    }
+
+    return dbg_req_core->bpt_list.count;
+}
+
 #pragma endregion
 
 #pragma region init and update
@@ -1183,7 +1211,7 @@ int Update()
 
     if (is_paused)
     {
-        process_request();
+        //process_request();
         return 0;
     }
 
@@ -1233,7 +1261,7 @@ int Update()
         SDL_SemWait(sdl_sync.sem_sync);
     }*/
 
-    process_request();
+    //process_request();
 
     return running;
 }
@@ -1310,7 +1338,9 @@ int InitSystem()
     /* reset system hardware */
     system_reset();
 
-    if (use_sound) SDL_PauseAudio(0);
+    //if (use_sound) 
+        //SDL_PauseAudio(0);
+    SDL_PauseAudioDevice(audioDeviceId, 0);
 
     /* 3 frames = 50 ms (60hz) or 60 ms (50hz) */
     if (sdl_sync.sem_sync)
@@ -1318,7 +1348,6 @@ int InitSystem()
 
     // TODO: Debug init
     ShowSDLWindow();
-    SDL_PauseAudio(0);
 
     return 1;
 }
@@ -1443,7 +1472,8 @@ int Init(int width, int height, void* parent, int pal, char region, int use_game
     }
     CheckForError();
     sdl_video_init();
-    if (use_sound) sdl_sound_init();
+    //if (use_sound) 
+    sdl_sound_init();
     sdl_sync_init();
 
     /* initialize Genesis virtual system */

@@ -138,19 +138,10 @@ void send_dbg_request(dbg_request_t *request, request_type_t type, int ignore_ac
     if (!request)
         return;
 
-    request->req_type = type;
+    enqueue_req(request, type);
 
     if (ignore_active) {
         request->dbg_active = 1;
-    }
-
-    while (request && request->dbg_active == 1 && request->req_type != REQ_NO_REQUEST)
-    {
-#ifdef _WIN32
-        Sleep(10);
-#else
-        usleep(10 * 1000);
-#endif
     }
 }
 
@@ -159,19 +150,43 @@ void send_dbg_request_forced(dbg_request_t* request, request_type_t type, int fo
     if (!request)
         return;
 
-    request->req_type = type;
+    enqueue_req(request, type);
 
-    while (request && request->dbg_active == 1 && request->req_type != REQ_NO_REQUEST)
+    if (force_process_request)
     {
-        if (force_process_request)
+        process_request();
+    }
+}
+// MAX_REQ_QUEUE_SIZE
+void enqueue_req(dbg_request_t* request, request_type_t type)
+{
+    request->updating = 1;
+    request_data* data = malloc(sizeof(request_data));
+
+    if (data == NULL)
+    {
+        printf("\nERROR: Cannot allocation memory\n");
+        return;
+    }
+
+    data->next = NULL;
+    data->type = type;
+
+    if (request->request_queue != NULL)
+    {
+        request_data* current = request->request_queue;
+        while (current->next != NULL)
         {
-            process_request();
+            current = current->next;
         }
 
-#ifdef _WIN32
-        Sleep(10);
-#else
-        usleep(10 * 1000);
-#endif
+        current->next = data;
     }
+    else
+    {
+        request->request_queue = data;
+    }
+
+    request->updating = 0;
+    
 }

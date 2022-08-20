@@ -252,8 +252,17 @@ typedef struct {
     int applied;
 } pc_map_t;
 
+typedef struct request_data request_data;
+
+struct request_data {
+    request_data* next;
+    request_type_t type;
+};
+
+#define MAX_REQ_QUEUE_SIZE 25
+
 typedef struct {
-    request_type_t req_type;
+    request_data* request_queue;
     register_data_t regs_data;
     memory_data_t mem_data;
     bpt_data_t bpt_data;
@@ -261,7 +270,7 @@ typedef struct {
     debugger_event_t dbg_events[MAX_DBG_EVENTS];
     pc_map_t pc_map[MAXROMSIZE >> 1];
     bpt_list_t bpt_list;
-    int dbg_active, dbg_paused;
+    int dbg_active, dbg_paused, updating;
 } dbg_request_t;
 #pragma pack(pop)
 
@@ -270,6 +279,7 @@ dbg_request_t *open_shared_mem();
 void close_shared_mem(dbg_request_t **request, int do_unmap);
 int recv_dbg_event_ida(dbg_request_t* request, int wait);
 void send_dbg_request(dbg_request_t *request, request_type_t type, int ignore_active);
+void enqueue_req(dbg_request_t* request, request_type_t type);
 
 #ifdef __cplusplus
 }
