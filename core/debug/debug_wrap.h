@@ -279,6 +279,7 @@ dbg_request_t *open_shared_mem();
 void close_shared_mem(dbg_request_t **request, int do_unmap);
 int recv_dbg_event_ida(dbg_request_t* request, int wait);
 void send_dbg_request(dbg_request_t *request, request_type_t type, int ignore_active);
+void send_dbg_request_forced(dbg_request_t* request, request_type_t type, int force_process_request);
 void enqueue_req(dbg_request_t* request, request_type_t type);
 
 #ifdef __cplusplus

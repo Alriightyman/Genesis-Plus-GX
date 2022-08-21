@@ -17,6 +17,10 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
+
+#include <chrono>
+#include <thread>
+
 #define SOUND_FREQUENCY 48000
 #define SOUND_SAMPLES_SIZE  2048
 
@@ -31,7 +35,7 @@ int running = 0;
 
 
 jmp_buf jmp_env;
-dbg_request_t* dbg_req_core;
+//dbg_request_t* dbg_req_core;
 
 int log_error   = 0;
 int debug_on    = 0;
@@ -934,6 +938,7 @@ int Shutdown()
     sdl_sound_close();
     sdl_sync_close();
     //SDL_Quit(); // hmm.. calling this and relaunching causes an exception with class registration
+    return 0;
 }
 
 int Reset()
@@ -941,6 +946,7 @@ int Reset()
     SaveMcdBram();
     SaveSram();
     system_reset();
+    return 0;
 }
 
 void SoftReset()
@@ -953,13 +959,13 @@ void SoftReset()
 int GetDReg(int index)
 {  
     int addrRegIndex = M68K_REG_D0 + index;
-    return m68k_get_reg(addrRegIndex);
+    return m68k_get_reg((m68k_register_t)addrRegIndex);
 }
 
 int GetAReg(int index)
 {
     int addrRegIndex = M68K_REG_A0 + index;
-    return m68k_get_reg(addrRegIndex);
+    return m68k_get_reg((m68k_register_t)addrRegIndex);
 }
 
 int GetSR()
@@ -1198,7 +1204,8 @@ int CleanupBreakpoints(unsigned int* addresses)
 
 #pragma region init and update
 
-int old_ticks = 0;
+double next_time = 0;
+auto startTime = std::chrono::system_clock::now();
 
 int Update()
 {
@@ -1243,15 +1250,16 @@ int Update()
         }
     }
 
-    int current = SDL_GetTicks();
-    int delta = current - old_ticks;
- 
-    // lock at 60 fps
-    if (delta > 1000 / 60.0f)
+    auto endTime = std::chrono::system_clock::now();
+    std::chrono::duration<double, std::milli> delta = endTime - startTime;
+
+    const double max_time = 1000.0 / 60.0;
+    if (delta.count() >= max_time)
     {
         sdl_video_update();
         sdl_sound_update(use_sound);
-        old_ticks = current;
+
+        startTime = endTime;
     }
 
     // leaving this commented out - seems to not render as well as it claims.
@@ -1354,7 +1362,7 @@ int InitSystem()
 
 int LoadRom(const char* path)
 {
-    load_rom(path);
+    load_rom((char*)path);
 
     // this all relies on the results of load_rom
     // so, instead of this happing in Init, it needs
@@ -1432,7 +1440,7 @@ int Init(int width, int height, void* parent, int pal, char region, int use_game
     dbg_req_core = create_shared_mem();
     start_debugging();
 
-    set_cpu_hook(process_breakpoints);
+    set_cpu_hook((cpu_hook_t)process_breakpoints);
     
     /* mark all BIOS as unloaded */ 
     system_bios = 0;
