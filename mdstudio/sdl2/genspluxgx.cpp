@@ -1253,7 +1253,10 @@ int Update()
     auto endTime = std::chrono::system_clock::now();
     std::chrono::duration<double, std::milli> delta = endTime - startTime;
 
-    const double max_time = 1000.0 / 60.0;
+    // small speedup needed to keep closer to 60 fps
+    // 1000/60 yields around 58-60 fps 
+    // 1000/61.5 gives around 59-61
+    const double max_time = 1000.0 / 61.5;
     if (delta.count() >= max_time)
     {
         sdl_video_update();
