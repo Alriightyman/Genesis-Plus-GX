@@ -14,6 +14,7 @@
 #endif /* M68K_EMULATE_ADDRESS_ERROR */
 
 #include "m68k.h"
+#include "debug.h"
 
 
 /* ======================================================================== */
@@ -186,6 +187,7 @@
 #define REG_DA           m68ki_cpu.dar /* easy access to data and address regs */
 #define REG_D            m68ki_cpu.dar
 #define REG_A            (m68ki_cpu.dar+8)
+#define REG_PPC          m68ki_cpu.ppc
 #define REG_PC           m68ki_cpu.pc
 #define REG_SP_BASE      m68ki_cpu.sp
 #define REG_USP          m68ki_cpu.sp[0]
@@ -870,8 +872,8 @@ INLINE uint m68ki_read_16(uint address)
   cpu_memory_map *temp;
   uint val;
 
-  m68ki_set_fc(FLAG_S | m68ki_get_address_space()) /* auto-disable (see m68kcpu.h) */
-  m68ki_check_address_error(address, MODE_READ, FLAG_S | m68ki_get_address_space()) /* auto-disable (see m68kcpu.h) */
+  m68ki_set_fc(FLAG_S | m68ki_get_address_space()); /* auto-disable (see m68kcpu.h) */
+  m68ki_check_address_error(address, MODE_READ, FLAG_S | m68ki_get_address_space()); /* auto-disable (see m68kcpu.h) */
   
   temp = &m68ki_cpu.memory_map[((address)>>16)&0xff];
   if (temp->read16) val = (*temp->read16)(ADDRESS_68K(address));
@@ -890,8 +892,8 @@ INLINE uint m68ki_read_32(uint address)
   cpu_memory_map *temp;
   uint val;
 
-  m68ki_set_fc(FLAG_S | m68ki_get_address_space()) /* auto-disable (see m68kcpu.h) */
-  m68ki_check_address_error(address, MODE_READ, FLAG_S | m68ki_get_address_space()) /* auto-disable (see m68kcpu.h) */
+  m68ki_set_fc(FLAG_S | m68ki_get_address_space()); /* auto-disable (see m68kcpu.h) */
+  m68ki_check_address_error(address, MODE_READ, FLAG_S | m68ki_get_address_space()); /* auto-disable (see m68kcpu.h) */
 
   temp = &m68ki_cpu.memory_map[((address)>>16)&0xff];
   if (temp->read16) val = ((*temp->read16)(ADDRESS_68K(address)) << 16) | ((*temp->read16)(ADDRESS_68K(address + 2)));
@@ -1408,6 +1410,11 @@ INLINE void m68ki_exception_interrupt(uint int_level)
   /* If vector is uninitialized, call the uninitialized interrupt vector */
   if(new_pc == 0)
     new_pc = m68ki_read_32((EXCEPTION_UNINITIALIZED_INTERRUPT<<2));
+
+  if (!dbg_in_interrupt) {
+    dbg_in_interrupt = 1;
+    //resume_debugger();
+  }
 
   /* Generate a stack frame */
   m68ki_stack_frame_3word(REG_PC, sr);

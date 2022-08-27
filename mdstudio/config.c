@@ -53,6 +53,9 @@ void set_config_defaults(void)
   config.gun_cursor[0]  = 1;
   config.gun_cursor[1]  = 1;
   config.invert_mouse   = 0;
+  config.enhanced_vscroll = 0;
+  config.enhanced_vscroll_limit = 8;
+
   for (i=0;i<MAX_INPUTS;i++)
   {
     /* autodetected control pad type */

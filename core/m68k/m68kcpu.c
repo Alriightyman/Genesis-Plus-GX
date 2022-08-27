@@ -113,6 +113,7 @@ unsigned int m68k_get_reg(m68k_register_t regnum)
     case M68K_REG_PREF_ADDR:  return m68ki_cpu.pref_addr;
     case M68K_REG_PREF_DATA:  return m68ki_cpu.pref_data;
 #endif
+    case M68K_REG_PPC:	return MASK_OUT_ABOVE_32(m68ki_cpu.ppc);
     case M68K_REG_IR:  return m68ki_cpu.ir;
     default:      return 0;
   }
@@ -151,6 +152,7 @@ void m68k_set_reg(m68k_register_t regnum, unsigned int value)
               else
                 REG_ISP = MASK_OUT_ABOVE_32(value);
               return;
+    case M68K_REG_PPC:	REG_PPC = MASK_OUT_ABOVE_32(value); return;
     case M68K_REG_IR:  REG_IR = MASK_OUT_ABOVE_16(value); return;
 #if M68K_EMULATE_PREFETCH
     case M68K_REG_PREF_ADDR:  CPU_PREF_ADDR = MASK_OUT_ABOVE_32(value); return;
@@ -279,7 +281,7 @@ void m68k_run(unsigned int cycles)
   m68ki_set_address_error_trap() /* auto-disable (see m68kcpu.h) */
 
 #ifdef LOGERROR
-  error("[%d][%d] m68k run to %d cycles (%x), irq mask = %x (%x)\n", v_counter, m68k.cycles, cycles, m68k.pc,FLAG_INT_MASK, CPU_INT_LEVEL);
+  error("[%d][%d] m68k run to %d cycles (%x), irq mask = %x (pc: 0x%.6x)\n", v_counter, m68k.cycles, cycles, m68k.pc,FLAG_INT_MASK, CPU_INT_LEVEL);
 #endif
 
   while (m68k.cycles < cycles)
@@ -295,6 +297,9 @@ void m68k_run(unsigned int cycles)
     if (cpu_hook)
       cpu_hook(HOOK_M68K_E, 0, REG_PC, 0);
 #endif
+
+    /* Record previous program counter */
+    REG_PPC = REG_PC;
 
     /* Decode next instruction */
     REG_IR = m68ki_read_imm_16();

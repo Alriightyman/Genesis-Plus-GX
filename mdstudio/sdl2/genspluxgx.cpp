@@ -10,9 +10,17 @@ extern "C" {
 #include "shared.h"
 #include "sms_ntsc.h"
 #include "md_ntsc.h"
+
+#include "debug.h"
+#include "debug_wrap.h"
+
 #ifdef __cplusplus
 }
 #endif
+
+#include <chrono>
+#include <thread>
+
 #define SOUND_FREQUENCY 48000
 #define SOUND_SAMPLES_SIZE  2048
 
@@ -23,6 +31,11 @@ int windowWidth = VIDEO_WIDTH;
 int windowHeight = VIDEO_HEIGHT;
 
 int joynum = 0;
+int running = 0;
+
+
+jmp_buf jmp_env;
+//dbg_request_t* dbg_req_core;
 
 int log_error   = 0;
 int debug_on    = 0;
@@ -30,6 +43,7 @@ int turbo_mode  = 0;
 int use_sound   = 1;
 int fullscreen = 0;// SDL_WINDOW_FULLSCREEN;
 SDL_TimerID sdl_timer_id = NULL;
+SDL_AudioDeviceID audioDeviceId = 0;
 
 typedef struct
 {
@@ -81,13 +95,15 @@ struct {
 } sdl_sound;
 
 
-void CheckForError()
+int CheckForError()
 {
     const char* error = SDL_GetError();
     if (strcmp(error,"") != 0)
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", error, NULL);
+        return 1;
     }
+    return 0;
 }
 
 
@@ -124,6 +140,7 @@ static int sdl_sound_init()
 {
     int n;
     SDL_AudioSpec as_desired;
+    SDL_AudioSpec output;
 
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "SDL Audio initialization failed", sdl_video.window);
@@ -136,7 +153,9 @@ static int sdl_sound_init()
     as_desired.samples = SOUND_SAMPLES_SIZE;
     as_desired.callback = sdl_sound_callback;
 
-    if (SDL_OpenAudio(&as_desired, NULL) < 0) {
+    audioDeviceId = SDL_OpenAudioDevice(NULL, 0, &as_desired, &output, 0);
+    if(audioDeviceId <= 0) {
+    //if (SDL_OpenAudio(&as_desired, NULL) < 0) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "SDL Audio open failed", sdl_video.window);
         return 0;
     }
@@ -162,7 +181,8 @@ static void sdl_sound_update(int enabled)
         int i;
         short* out;
 
-        SDL_LockAudio();
+        //SDL_LockAudio();
+        SDL_LockAudioDevice(audioDeviceId);
         out = (short*)sdl_sound.current_pos;
         for (i = 0; i < size; i++)
         {
@@ -170,13 +190,15 @@ static void sdl_sound_update(int enabled)
         }
         sdl_sound.current_pos = (char*)out;
         sdl_sound.current_emulated_samples += size * sizeof(short);
-        SDL_UnlockAudio();
+        //SDL_UnlockAudio();
+        SDL_UnlockAudioDevice(audioDeviceId);
     }
 }
 
 static void sdl_sound_close()
 {
-    SDL_PauseAudio(1);
+    //SDL_PauseAudio(1);
+    SDL_PauseAudioDevice(audioDeviceId, 1);
     SDL_CloseAudio();
     if (sdl_sound.buffer)
         free(sdl_sound.buffer);
@@ -205,21 +227,35 @@ static int sdl_video_init()
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "SDL Video initialization failed", sdl_video.window);
         return 0;
     }
-    CheckForError();
-    sdl_video.window = SDL_CreateWindow("GPGX", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, SDL_WINDOW_HIDDEN | SDL_WINDOW_INPUT_FOCUS );
 
-    CheckForError();
+    if (CheckForError())
+        return 0;
+
+    sdl_video.window = SDL_CreateWindow("Genesis Plus GX", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN | SDL_WINDOW_INPUT_FOCUS );
+    if (sdl_video.window == NULL)
+    {
+        sdl_video.window = SDL_CreateWindow("Genesis Plus GX", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_INPUT_FOCUS);        
+    }
+
+    if (CheckForError())
+        return 0;
+
 #ifdef ALT_SDL_RENDERER
-    sdl_video.renderer = SDL_CreateRenderer(sdl_video.window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE);
-    CheckForError();
+    sdl_video.renderer = SDL_CreateRenderer(sdl_video.window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
+
+    if (CheckForError())
+        return 0;
+    
     sdl_video.back_buffer = SDL_CreateTexture(sdl_video.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, windowWidth, windowHeight);
-    CheckForError();
+    
+    if (CheckForError())
+        return 0;
 #else
     sdl_video.surf_screen = SDL_GetWindowSurface(sdl_video.window);
     sdl_video.surf_bitmap = SDL_CreateRGBSurfaceWithFormat(0, VIDEO_WIDTH, VIDEO_HEIGHT, SDL_BITSPERPIXEL(surface_format), surface_format);
     sdl_video.frames_rendered = 0;
 #endif // ALT_SDL_RENDER
-    SDL_ShowCursor(0);
+    //SDL_ShowCursor(0);
     return 1;
 }
 
@@ -361,23 +397,28 @@ struct {
 
 static Uint32 sdl_sync_timer_callback(Uint32 interval, void* param)
 {
-    SDL_SemPost(sdl_sync.sem_sync);
-    sdl_sync.ticks++;
-    if (sdl_sync.ticks == (vdp_pal ? 50 : 20))
+    // need to check for paused. if not, then after resuming
+    // the emulator will attempt to "catch up" over 60fps. 
+    if (!is_debugger_paused())
     {
-        SDL_Event event;
-        SDL_UserEvent userevent;
+        SDL_SemPost(sdl_sync.sem_sync);
+        sdl_sync.ticks++;
+        if (sdl_sync.ticks == (vdp_pal ? 50 : 20))
+        {
+            SDL_Event event;
+            SDL_UserEvent userevent;
 
-        userevent.type = SDL_USEREVENT;
-        userevent.code = vdp_pal ? (sdl_video.frames_rendered / 3) : sdl_video.frames_rendered;
-        userevent.data1 = NULL;
-        userevent.data2 = NULL;
-        sdl_sync.ticks = sdl_video.frames_rendered = 0;
+            userevent.type = SDL_USEREVENT;
+            userevent.code = vdp_pal ? (sdl_video.frames_rendered / 3) : sdl_video.frames_rendered;
+            userevent.data1 = NULL;
+            userevent.data2 = NULL;
+            sdl_sync.ticks = sdl_video.frames_rendered = 0;
 
-        event.type = SDL_USEREVENT;
-        event.user = userevent;
+            event.type = SDL_USEREVENT;
+            event.user = userevent;
 
-        SDL_PushEvent(&event);
+            SDL_PushEvent(&event);
+        }
     }
     return interval;
 }
@@ -877,6 +918,365 @@ void BringToFront()
 }
 #pragma endregion
 
+// function prototypes for shutdown
+void SaveMcdBram();
+void SaveSram();
+
+#pragma region Editor Commands for debugging
+
+int Shutdown()
+{
+    running = 0;
+    set_cpu_hook(NULL);
+    stop_debugging();
+    close_shared_mem(&dbg_req_core, 1);
+
+    audio_shutdown();
+    error_shutdown();
+
+    sdl_video_close();
+    sdl_sound_close();
+    sdl_sync_close();
+    //SDL_Quit(); // hmm.. calling this and relaunching causes an exception with class registration
+    return 0;
+}
+
+int Reset()
+{
+    SaveMcdBram();
+    SaveSram();
+    system_reset();
+    return 0;
+}
+
+void SoftReset()
+{
+    // doesn't exist?
+    // just reset
+    system_reset();
+}
+
+int GetDReg(int index)
+{  
+    int addrRegIndex = M68K_REG_D0 + index;
+    return m68k_get_reg((m68k_register_t)addrRegIndex);
+}
+
+int GetAReg(int index)
+{
+    int addrRegIndex = M68K_REG_A0 + index;
+    return m68k_get_reg((m68k_register_t)addrRegIndex);
+}
+
+int GetSR()
+{    
+    return m68k_get_reg(M68K_REG_SR);
+}
+
+int GetCurrentPC()
+{
+    return m68k_get_reg(M68K_REG_PC);
+}
+
+int GetZ80Reg(int index)
+{
+    switch (index)
+    {
+    case 0:
+        return (int)Z80.af.d;
+    case 1:
+        return (int)Z80.bc.d;
+    case 2:
+        return (int)Z80.de.d;
+    case 3:
+        return (int)Z80.hl.d;
+    case 4:
+        return (int)Z80.af2.d;
+    case 5:
+        return (int)Z80.bc2.d;
+    case 6:
+        return (int)Z80.de2.d;
+    case 7:
+        return (int)Z80.hl2.d;
+    case 8:
+        return (int)Z80.ix.d;
+    case 9:
+        return (int)Z80.iy.d;
+    case 10:
+        return (int)Z80.sp.d;
+    case 11:
+        return (int)Z80.pc.d;
+    }
+    return 0;
+}
+
+unsigned char ReadByte(unsigned int address)
+{
+    // TODO:
+    return 0;
+}
+
+unsigned short ReadWord(unsigned int address)
+{
+    // TODO:
+    return 0;
+}
+
+unsigned int ReadLong(unsigned int address)
+{
+    return 0;
+}
+
+void ReadMemory(unsigned int address, unsigned int size, BYTE* memory)
+{
+    for (unsigned int i = 0; i < size; i+=2)
+    {
+        // work ram is byte swapped..
+        memory[i] = work_ram[i+1];
+        memory[i + 1] = work_ram[i];
+    }
+}
+
+unsigned char ReadZ80Byte(unsigned int address)
+{
+    // TODO:
+    return 0;
+}
+
+void SetInputMapping(int input, int mapping)
+{
+    sdlInputMapping[input].sdlKey = mapping;
+}
+
+int GetInputMapping(int input)
+{
+    return sdlInputMapping[input].sdlKey;
+}
+
+int GetPaletteEntry(int index)
+{
+    // Add CRAM Viewer
+    return 0;
+}
+
+unsigned char GetVDPRegisterValue(int index)
+{
+    // Add VDP Register Viewer
+    return 0;
+}
+
+unsigned int Disassemble(unsigned int address, char* text)
+{
+    // Add disassemble
+    return 0;
+}
+
+void SetVolume(int vol, int isdebugVol)
+{
+    // Add Volume changing
+}
+
+void PauseAudio(int pause)
+{
+    use_sound = !pause;
+}
+
+int AddBreakpoint(int addr)
+{
+    bpt_data_t* _bpt_data = &dbg_req_core->bpt_data;
+
+    _bpt_data->enabled = 1;
+    _bpt_data->address = addr;
+    _bpt_data->width = 0;
+    _bpt_data->type = BPT_M68K_E;
+
+    int forceProcessRequest = 0;
+
+    if (running == 0)
+    {
+        forceProcessRequest = 1;
+    }
+
+    send_dbg_request_forced(dbg_req_core, REQ_ADD_BREAK, 1);
+    return 0;
+}
+
+void ClearBreakpoint(int addr)
+{
+    bpt_data_t* bpt_data = &dbg_req_core->bpt_data;
+    bpt_data->address = addr;
+    bpt_data->type = BPT_M68K_E;
+
+    int forceProcessRequest = 0;
+
+    if (running == 0)
+    {
+        forceProcessRequest = 1;
+    }
+
+    send_dbg_request_forced(dbg_req_core, REQ_DEL_BREAK, 1);
+}
+
+void ClearBreakpoints()
+{
+    int forceProcessRequest = 0;
+
+    if (running == 0)
+    {
+        forceProcessRequest = 1;
+    }
+
+    send_dbg_request_forced(dbg_req_core, REQ_CLEAR_BREAKS, 1);
+}
+
+int AddWatchpoint(int fromAddr, int toAddr)
+{
+    // TODO: add watchpoints
+    return 0;
+}
+
+void ClearWatchpoint(int fromAddr)
+{
+    // TODO: add watchpoints
+}
+
+void ClearWatchpoints()
+{
+    // TODO: add watchpoints
+}
+
+int StepInto()
+{
+    send_dbg_request_forced(dbg_req_core, REQ_STEP_INTO, 1);
+    return 0;
+}
+
+int Resume()
+{
+    send_dbg_request_forced(dbg_req_core, REQ_RESUME, 1);
+    return 0;
+}
+
+int Break()
+{
+    send_dbg_request_forced(dbg_req_core, REQ_PAUSE, 1);
+    return 0;
+}
+
+int IsDebugging()
+{    
+    return is_debugger_paused() && running == 1;
+}
+
+unsigned int* GetProfilerResults(int* instructionCount)
+{
+    // TODO: add profiling
+    *instructionCount = 0;
+    return NULL;
+}
+
+unsigned int GetInstructionCycleCount(unsigned int address)
+{
+    // TODO: add profiling
+    return 0;
+}
+
+unsigned char* GetVRAM()
+{
+    // Add Vram plane viewer
+    return NULL;
+}
+
+int CleanupBreakpoints(unsigned int* addresses)
+{
+    send_dbg_request_forced(dbg_req_core, REQ_LIST_BREAKS, 1);   
+
+    for (int i = 0; i < dbg_req_core->bpt_list.count; i++)
+    {
+        bpt_data_t b = dbg_req_core->bpt_list.breaks[i];     
+        addresses[i] = b.address;
+    }
+
+    return dbg_req_core->bpt_list.count;
+}
+
+#pragma endregion
+
+#pragma region init and update
+
+double next_time = 0;
+auto startTime = std::chrono::system_clock::now();
+
+int Update()
+{
+    if (is_debugger_paused())
+    {
+        longjmp(jmp_env, 1);
+    }
+
+    int is_paused = setjmp(jmp_env);
+
+    if (is_paused)
+    {
+        //process_request();
+        return 0;
+    }
+
+    running = 1;
+
+    SDL_Event event;
+    if (SDL_PollEvent(&event))
+    {
+        switch (event.type)
+        {
+        case SDL_USEREVENT:
+        {
+            char caption[100];
+            sprintf(caption, "Genesis Plus GX - %d fps - %s", event.user.code, (rominfo.international[0] != 0x20) ? rominfo.international : rominfo.domestic);
+            SDL_SetWindowTitle(sdl_video.window, caption);
+            break;
+        }
+
+        case SDL_QUIT:
+        {
+            running = 0;
+            break;
+        }
+
+        case SDL_KEYDOWN:
+        {
+            running = sdl_control_update(event.key.keysym.sym);
+        }
+        }
+    }
+
+    auto endTime = std::chrono::system_clock::now();
+    std::chrono::duration<double, std::milli> delta = endTime - startTime;
+
+    // small speedup needed to keep closer to 60 fps
+    // 1000/60 yields around 58-60 fps 
+    // 1000/61.5 gives around 59-61
+    const double max_time = 1000.0 / 61.5;
+    if (delta.count() >= max_time)
+    {
+        sdl_video_update();
+        sdl_sound_update(use_sound);
+
+        startTime = endTime;
+    }
+
+    // leaving this commented out - seems to not render as well as it claims.
+    /*if (!turbo_mode && sdl_sync.sem_sync && sdl_video.frames_rendered % 3 == 0)
+    {
+        printf("Frames: %d\n", sdl_video.frames_rendered);
+        SDL_SemWait(sdl_sync.sem_sync);
+    }*/
+
+    //process_request();
+
+    return running;
+}
+
 int InitSystem()
 {
     /* initialize system hardware */
@@ -949,7 +1349,9 @@ int InitSystem()
     /* reset system hardware */
     system_reset();
 
-    if (use_sound) SDL_PauseAudio(0);
+    //if (use_sound) 
+        //SDL_PauseAudio(0);
+    SDL_PauseAudioDevice(audioDeviceId, 0);
 
     /* 3 frames = 50 ms (60hz) or 60 ms (50hz) */
     if (sdl_sync.sem_sync)
@@ -957,14 +1359,13 @@ int InitSystem()
 
     // TODO: Debug init
     ShowSDLWindow();
-    SDL_PauseAudio(0);
 
     return 1;
 }
 
 int LoadRom(const char* path)
 {
-    load_rom(path);
+    load_rom((char*)path);
 
     // this all relies on the results of load_rom
     // so, instead of this happing in Init, it needs
@@ -1021,275 +1422,29 @@ void SaveSram()
     }
 }
 
-int Shutdown()
-{
-    audio_shutdown();
-    error_shutdown();
-
-    sdl_video_close();
-    sdl_sound_close();
-    sdl_sync_close();
-    //SDL_Quit(); // hmm.. calling this and relaunching causes an exception with class registration
-}
-
-int Reset()
-{
-    SaveMcdBram();
-    SaveSram();
-    system_reset();
-}
-
-void SoftReset()
-{
-    // doesn't exist?
-    // just reset
-    system_reset();
-}
-
-int Update()
-{
-    static int running = 1;
-    SDL_Event event;
-    if (SDL_PollEvent(&event))
-    {
-        switch (event.type)
-        {
-            case SDL_USEREVENT:
-            {
-                char caption[100];
-                sprintf(caption, "Genesis Plus GX - %d fps - %s", event.user.code, (rominfo.international[0] != 0x20) ? rominfo.international : rominfo.domestic);
-                SDL_SetWindowTitle(sdl_video.window, caption);
-                break;
-            }
-
-            case SDL_QUIT:
-            {
-                running = 0;
-                break;
-            }
-
-            case SDL_KEYDOWN:
-            {
-                running = sdl_control_update(event.key.keysym.sym);            
-            }
-        }
-    }
-
-    sdl_video_update();
-    sdl_sound_update(use_sound);
-
-    if (!turbo_mode && sdl_sync.sem_sync && sdl_video.frames_rendered % 3 == 0)
-    {
-        SDL_SemWait(sdl_sync.sem_sync);
-    }
-
-    return running;
-}
-
-int GetDReg(int index)
-{  
-    int addrRegIndex = M68K_REG_D0 + index;
-    return m68k_get_reg(addrRegIndex);
-}
-
-int GetAReg(int index)
-{
-    int addrRegIndex = M68K_REG_A0 + index;
-    return m68k_get_reg(addrRegIndex);
-}
-
-int GetSR()
-{    
-    return m68k_get_reg(M68K_REG_SR);
-}
-
-int GetCurrentPC()
-{
-    return m68k_get_reg(M68K_REG_PC);
-}
-
-int GetZ80Reg(int index)
-{
-    switch (index)
-    {
-    case 0:
-        return (int)Z80.af.d;
-    case 1:
-        return (int)Z80.bc.d;
-    case 2:
-        return (int)Z80.de.d;
-    case 3:
-        return (int)Z80.hl.d;
-    case 4:
-        return (int)Z80.af2.d;
-    case 5:
-        return (int)Z80.bc2.d;
-    case 6:
-        return (int)Z80.de2.d;
-    case 7:
-        return (int)Z80.hl2.d;
-    case 8:
-        return (int)Z80.ix.d;
-    case 9:
-        return (int)Z80.iy.d;
-    case 10:
-        return (int)Z80.sp.d;
-    case 11:
-        return (int)Z80.pc.d;
-    }
-    return 0;
-}
-
-unsigned char ReadByte(unsigned int address)
-{
-    // TODO:
-    return 0;
-}
-
-unsigned short ReadWord(unsigned int address)
-{
-    // TODO:
-    return 0;
-}
-
-unsigned int ReadLong(unsigned int address)
-{
-    return 0;
-}
-
-void ReadMemory(unsigned int address, unsigned int size, BYTE* memory)
-{
-    // TODO:
-    for (unsigned int i = 0; i < size; i++)
-    {
-        memory[i] = 0;
-    }
-}
-
-unsigned char ReadZ80Byte(unsigned int address)
-{
-    // TODO:
-    return 0;
-}
-
-void SetInputMapping(int input, int mapping)
-{
-    sdlInputMapping[input].sdlKey = mapping;
-}
-
-int GetInputMapping(int input)
-{
-    return sdlInputMapping[input].sdlKey;
-}
-
-int GetPaletteEntry(int index)
-{
-    return 0;
-}
-
-unsigned char GetVDPRegisterValue(int index)
-{
-    return 0;
-}
-
-unsigned int Disassemble(unsigned int address, char* text)
-{
-    return 0;
-}
-
-void SetVolume(int vol, int isdebugVol)
-{
-}
-
-void PauseAudio(int pause)
-{
-}
-
-int AddBreakpoint(int addr)
-{
-    // TODO: add breakpoint debugging
-    return 0;
-}
-
-void ClearBreakpoint(int addr)
-{
-    // TODO: add breakpoint debugging
-}
-
-void ClearBreakpoints()
-{
-    // TODO: add breakpoint debugging
-}
-
-int AddWatchpoint(int fromAddr, int toAddr)
-{
-    // TODO: add breakpoint debugging
-    return 0;
-}
-
-void ClearWatchpoint(int fromAddr)
-{
-    // TODO: add breakpoint debugging
-}
-
-void ClearWatchpoints()
-{
-    // TODO: add breakpoint debugging
-}
-
-int StepInto()
-{
-    // TODO: add breakpoint debugging
-    return 0;
-}
-
-int Resume()
-{
-    // TODO: add breakpoint debugging
-    return 0;
-}
-
-int Break()
-{
-    // TODO: add breakpoint debugging
-    return 0;
-}
-
-int IsDebugging()
-{
-    // TODO: add breakpoint debugging
-    return 0;
-}
-
-unsigned int* GetProfilerResults(int* instructionCount)
-{
-    // TODO: add breakpoint debugging
-    *instructionCount = 0;
-    return NULL;
-}
-
-unsigned int GetInstructionCycleCount(unsigned int address)
-{
-    // TODO: add breakpoint debugging
-    return 0;
-}
-
-unsigned char* GetVRAM()
-{
-    return NULL;
-}
-
 int Init(int width, int height, void* parent, int pal, char region, int use_gamepad)
 {
     windowHeight = height;
     windowWidth = width;
 
+#ifdef _DEBUG
+    AllocConsole();
+    freopen("CONIN$", "r", stdin);
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+#endif
     FILE* fp;
-    int running = 1;
+
     /* set default config */
     error_init();
     set_config_defaults();
 
+    // init debugging
+    dbg_req_core = create_shared_mem();
+    start_debugging();
+
+    set_cpu_hook((cpu_hook_t)process_breakpoints);
+    
     /* mark all BIOS as unloaded */ 
     system_bios = 0;
 
@@ -1328,7 +1483,8 @@ int Init(int width, int height, void* parent, int pal, char region, int use_game
     }
     CheckForError();
     sdl_video_init();
-    if (use_sound) sdl_sound_init();
+    //if (use_sound) 
+    sdl_sound_init();
     sdl_sync_init();
 
     /* initialize Genesis virtual system */
@@ -1367,3 +1523,5 @@ int Init(int width, int height, void* parent, int pal, char region, int use_game
  
     return 0;
 }
+
+#pragma endregion
