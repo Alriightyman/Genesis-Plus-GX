@@ -1029,11 +1029,13 @@ unsigned int ReadLong(unsigned int address)
 
 void ReadMemory(unsigned int address, unsigned int size, BYTE* memory)
 {
-    for (unsigned int i = 0; i < size; i+=2)
+    unsigned int mem_addr = address - 0xFFFF0000;
+
+    for (unsigned int i = mem_addr, index = 0; i < mem_addr+size && i < 0x10000; index += 2, i+=2)
     {
         // work ram is byte swapped..
-        memory[i] = work_ram[i+1];
-        memory[i + 1] = work_ram[i];
+        memory[index] = work_ram[i+1];
+        memory[index + 1] = work_ram[i];
     }
 }
 
@@ -1205,7 +1207,7 @@ int CleanupBreakpoints(unsigned int* addresses)
 #pragma region init and update
 
 double next_time = 0;
-auto startTime = std::chrono::system_clock::now();
+auto last_elapsed = std::chrono::high_resolution_clock::now();// std::chrono::system_clock::now();
 
 int Update()
 {
@@ -1250,22 +1252,27 @@ int Update()
         }
     }
 
-    auto endTime = std::chrono::system_clock::now();
-    std::chrono::duration<double, std::milli> delta = endTime - startTime;
+    using namespace std::chrono;
+    using hr_clock = high_resolution_clock;
+
+    auto endTime = hr_clock::now();
+    duration<float, std::milli> delta = endTime - last_elapsed;
 
     // small speedup needed to keep closer to 60 fps
     // 1000/60 yields around 58-60 fps 
     // 1000/61.5 gives around 59-61
-    const double max_time = 1000.0 / 61.5;
-    if (delta.count() >= max_time)
+    const float max_time = 1000.0 / 61.5;
+    if (delta.count() >= max_time) 
     {
         sdl_video_update();
         sdl_sound_update(use_sound);
 
-        startTime = endTime;
+        last_elapsed = endTime;
     }
 
-    // leaving this commented out - seems to not render as well as it claims.
+
+    // leaving this commented out
+    // Seems to be used to sync to 60fps but becomes very choppy instead
     /*if (!turbo_mode && sdl_sync.sem_sync && sdl_video.frames_rendered % 3 == 0)
     {
         printf("Frames: %d\n", sdl_video.frames_rendered);
