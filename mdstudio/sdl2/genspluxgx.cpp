@@ -13,6 +13,7 @@ extern "C" {
 
 #include "debug.h"
 #include "debug_wrap.h"
+#include "vdp_ctrl.h"
 
 #ifdef __cplusplus
 }
@@ -1183,10 +1184,28 @@ unsigned int GetInstructionCycleCount(unsigned int address)
     return 0;
 }
 
+
+unsigned char* GetCRAM()
+{
+    return cram;
+}
+
 unsigned char* GetVRAM()
 {
-    // Add Vram plane viewer
-    return NULL;
+    return vram;
+}
+
+BYTE* Get68kMemory()
+{  
+    BYTE* memory = new BYTE[0x10000];
+    for (unsigned int i = 0; i < 0xFFFF; i += 2)
+    {
+        // work ram is byte swapped..
+        memory[i] = work_ram[i + 1];
+        memory[i + 1] = work_ram[i];
+    }
+
+    return memory;
 }
 
 int CleanupBreakpoints(unsigned int* addresses)
@@ -1261,7 +1280,7 @@ int Update()
     // small speedup needed to keep closer to 60 fps
     // 1000/60 yields around 58-60 fps 
     // 1000/61.5 gives around 59-61
-    const float max_time = 1000.0 / 61.5;
+    const float max_time = 1000.0f / 60.0f;
     if (delta.count() >= max_time) 
     {
         sdl_video_update();

@@ -86,6 +86,8 @@ extern "C" {
 	extern void SetVolume(int vol, int isdebugVol);
 	extern void PauseAudio(int pause);
 	extern unsigned char* GetVRAM();
+	extern unsigned char* GetCRAM();
+	extern unsigned char* Get68kMemory();
 
 #ifdef __cplusplus
 }
